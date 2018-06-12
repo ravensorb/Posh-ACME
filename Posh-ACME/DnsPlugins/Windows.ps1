@@ -1,5 +1,3 @@
-#Requires -Modules DnsServer, CimCmdlets
-
 function Add-DnsTxtWindows {
     [CmdletBinding()]
     param(
@@ -190,6 +188,30 @@ function Connect-WinDns {
         [Parameter(ValueFromRemainingArguments)]
         $ExtraParams
     )
+
+    # make sure the necessary modules are loaded
+    if (!(Get-Module -ListAvailable CimCmdlets -Verbose:$false)) {
+        throw "The CimCmdlets module is required and was not found."
+    } else {
+        Import-Module CimCmdlets -Verbose:$false
+    }
+    if ($PSEdition -eq 'Core') {
+        # check for WindowsCompatibility module
+        if (!(Get-Module -ListAvailable WindowsCompatibility -Verbose:$false)) {
+            throw "The WindowsCompatibility module is required on PowerShell Core and was not found."
+        } else {
+            Import-Module WindowsCompatibility
+        }
+        # try to load DnsServer via WindowsCompatibility
+        Import-WinModule DnsServer
+    } else {
+        # check for locally installed DnsServer module
+        if (!(Get-Module -ListAvailable DnsServer -Verbose:$false)) {
+            throw "The DnsServer module is required and was not found."
+        } else {
+            Import-Module DnsServer
+        }
+    }
 
     # create a new CimSession if necessary
     if (Get-CimSession -ComputerName $WinServer -EA SilentlyContinue) {
