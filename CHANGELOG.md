@@ -1,3 +1,297 @@
+## 4.2.0 (2020-02-01)
+
+* Added new DNS plugins
+  * Infomaniak (Thanks @Sundypha)
+  * Zilore
+* Added `ACMEUri` option to AcmeDns plugin which allows specifying the complete URI instead of just the hostname. (Thanks @AvrumFeldman)
+
+## 4.1.0 (2020-01-18)
+
+* Compatibility updates for RFC2136 plugin (#308)
+  * Now uses exit code from nsupdate instead of output parsing to determine success and avoid possible language inconsistencies (#307)
+  * Added optional DDNSZone param to avoid initial SOA lookup that breaks in some environments (#307)
+* Removed UnoEuro plugin because API endpoint is no longer functional. Users should switch to the Simply plugin. (#303)
+* Moved HTTP call detail from Verbose to Debug output for Infoblox plugin
+* Fixed partial zone matching bug for Domeneshop plugin (#305)
+* Fixed `Submit-Renewal -AllOrders` so it no longer skips invalid or pending orders
+
+## 4.0.0 (2020-12-18)
+
+There is a 3.x to 4.x [migration guide](https://github.com/rmbolger/Posh-ACME/wiki/Frequently-Asked-Questions-%28FAQ%29#how-do-i-upgrade-from-3x-to-4x) in the FAQ on the wiki. But no changes should be necessary for users with existing certs that are renewing using `Submit-Renewal` unless they were also using the `-NewKey` parameter which has been removed. Orders can now be configured to always generate a new private key using `Set-PAOrder -AlwaysNewKey`.
+
+### New Features
+
+* The DNS plugin system has been revamped to support both dns-01 and http-01 challenges. (#124)
+  * All existing DNS plugins have been upgraded to the new plugin format. See the README in the plugins folder for details and instructions on how to upgrade your own custom plugins.
+  * There are two new http-01 challenge plugins called `WebRoot` and `WebSelfHost`. See their usage guides for details.
+* Plugin args are now saved per-order rather than per-account and as JSON rather than XML.
+  * This has the side effect that new orders using the same plugin(s) as a previous order will no longer reuse the previous args.
+  * Added `Get-PAPluginArgs` which returns a hashtable with the plugin args associated with the current or specified order. You can use this to retrieve another order's plugin args and use that object with your new order.
+  * Pre-4.x plugin args will be automatically migrated to per-order plugin args the first time an account is selected using `Set-PAAccount` or on module load for the last selected account. The old file will be backed up with a ".v3" extension in case you need to revert.
+* Portable, Cross-Platform encryption is now supported for secure plugin parameters on disk and can be configured on a per-account basis. It is based on a 256-bit AES key generated for the account. This makes it possible to migrate a Posh-ACME config between users, machines, or OSes without needing to re-configure secure plugin args. (#150)
+  * To enable, set the `UseAltPluginEncryption` switch on `New-PAAccount` or `Set-PAAccount`. This will immediately re-encrypt plugin args for all orders associated with the account.
+  * To disable/revert, run `Set-PAAccount -UseAltPluginEncryption:$false`.
+  * If you believe the encryption key has been compromised, use `Set-PAAccount -ResetAltPluginEncryption` to generate a new key and re-encrypt everything.
+* `Get-PAPlugin` is a new function that replaces `Get-DnsPlugins` and `Get-DnsPluginHelp`.
+  * With no parameters, lists all plugins and their details
+  * With a plugin parameter, shows the details for just that plugin
+  * With a plugin and `-Help`, shows the plugin's help
+  * With a plugin and `-Guide`, opens the default browser to the plugin's online guide
+  * With a plugin and `-Params`, displays the plugin-specific parameter sets (#151)
+* Added `AlwaysNewKey` switch to `New-PACertificate`, `New-PAOrder`, and `Set-PAOrder`. This flag tells Posh-ACME to always generate a new private key on renewals. The old parameters for key replacement have been removed. (#181)
+* Added `UseSerialValidation` switch to `New-PACertificate`, `New-PAOrder`, and `Set-PAOrder`. This flag tells Posh-ACME to process the order's authorization challenges serially rather than in parallel. This is primarily useful for providers like DuckDNS that only allow a single TXT record to be written at a time.
+* Added `Complete-PAOrder` which does the final processing steps like downloading the signed cert and updating renewal window for an order that has reached the 'ready' state. This avoids the need to use `New-PACertificate` when doing custom certificate workflows.
+* The PfxPass parameter on order objects is now obfuscated when serialized to disk. (#207)
+* Added `PfxPassSecure` (SecureString) parameter to `New-PACertificate`, `New-PAOrder`, and `Set-PAOrder` which takes precedence over `PfxPass` if specified. (#207)
+* Added `DnsAlias` and `OCSPMustStaple` parameters to `Set-PAOrder`. Changing an order's OCSPMustStaple value will throw a warning that it only affects future certificates generated from the order.
+* Added `Plugin`, `PluginArgs`, `DnsAlias`, `DnsSleep`, and `ValidationTimeout` parameters to `New-PAOrder`.
+* The `DirectoryUrl` parameter in `Set-PAServer` is now optional. If not specified, it will use the currently active server.
+* An attempt will now be made to send anonymous telemetry data to the Posh-ACME team when `Submit-OrderFinalize` is called directly or indirectly.
+  * The only data sent is the standard HTTP User-Agent header which includes the Posh-ACME version, PowerShell version, and generic OS platform (Windows/Linux/MacOS/Unknown).
+  * This can be disabled per ACME server using a new `DisableTelemetry` parameter in `Set-PAServer`.
+  * The data will be used to guide future development decisions in the module.
+  * The same User-Agent header is also sent with all calls to the ACME server which is a requirement of the protocol and can't be disabled.
+* Added `NoRefresh` switch to `Set-PAServer` which prevents a request to the ACME server to update endpoint and nonce info. This is useful for updating local preferences without making a server round-trip.
+* BUYPASS_PROD and BUYPASS_TEST are now recognized shortcuts for the the buypass.com CA environments when you use `Set-PAServer`.
+* ZEROSSL_PROD is now a recognized shortcut for the zerossl.com CA when you use `Set-PAServer`.
+* Added tab completion for `DirectoryUrl` in `Set-PAServer`.
+* Added `Quiet` parameter to `Get-PAServer` which will prevent warnings if the specified server was not found.
+* `Remove-PAServer` will now throw a warning instead of an error if the specified server doesn't exist on disk.
+* Orders can now be passed by pipeline to `Submit-ChallengeValidation` and `Submit-OrderFinalize`.
+* ACME protocol web request details have been moved from Verbose to Debug output and cleaned up so they're easier to follow. Web requests made from plugins will still be in Verbose output for the time being.
+* Experimental support for IP address identifiers ([RFC 8738](https://tools.ietf.org/html/rfc8738)) in new orders. This allows you to get a cert for an IP address if your ACME server supports it.
+* Private keys for Accounts and Certificates can now use ECC P-521 (secp521r1) based keys using the `ec-521` key length parameter. *This requires support at the ACME server level as well.*
+
+### Breaking Changes
+
+* Function Changes
+  * `Publish-DnsChallenge` is now `Publish-Challenge`
+  * `Unpublish-DnsChallenge` is now `Unpublish-Challenge`
+  * `Save-DnsChallenge` is now `Save-Challenge`
+  * `Get-DnsPlugins` and `Get-DnsPluginHelp` have been replaced by `Get-PAPlugin`
+  * `Get-PAAuthorizations` is now `Get-PAAuthorization`. The plural function name is still avaialble as an alias but is deprecated and may be removed in a future release.
+  * `Invoke-HttpChallengeListener` is deprecated and may be removed in a future release. Users should migrate to the `WebSelfHost` plugin.
+* Parameter Changes
+  * All `DnsPlugin` parameters are now `Plugin` with a `DnsPlugin` alias for backwards compatibility. The alias should be considered deprecated and may be removed in a future release.
+  * The `NoPrefix` switch in Publish/Unpublish-Challenge has been replaced with a `DnsAlias` parameter that will override the `Domain` parameter if specified. "_acme-challenge." will not be automatically added to the `DnsAlias` parameter.
+  * `NewKey` has been removed from `Submit-Renewal`
+  * `NewKey`/`NewCertKey` have been replaced by `AlwaysNewKey` in `New-PACertificate` and `New-PAOrder`
+  * `AlwaysNewKey` has been added to `Set-PAOrder`
+  * `DnsPlugin`, `PluginArgs`, `DnsAlias`, `DnsSleep`, `ValidationTimeout` and `Account` parameters have been removed from `Submit-ChallengeValidation`. The account associated with the order must be the currently active account. The rest of the parameters are read directly from the order object and can be modified in advance with `Set-PAOrder` if necessary.
+  * `Account` parameter has been removed from `Submit-OrderFinalize`. The account associated with the order must be the currently active account.
+
+### Fixes
+
+* Using `Get-PAOrder` with `-Refresh` will no longer throw a terminating error if the ACME server returns an error. It will warn and return the cached copy of the order instead.
+* Fixed `Remove-PAServer` not being able to remove a server that is unreachable.
+* `Remove-PAServer` no longer requires confirmation when there are no cached accounts associated with the specified server in the local config.
+
+
+## 3.20.0 (2020-11-25)
+
+* Azure plugin now supports other Azure cloud environments via the `AZEnvironment` parameter. Supported values are `AzureCloud` (Default), `AzureUSGovernment`, `AzureGermanCloud`, and `AzureChinaCloud`. (#293) (Thanks @InKahootz)
+* Fixed parameter binding and other bugs in Simply plugin. (#294)
+
+## 3.19.0 (2020-11-20)
+
+* Added new DNS plugin [Simply](https://www.simply.com/) who recently changed their name from UnoEuro. Existing users of the UnoEuro plugin should migrate to the Simply plugin as soon as possible because the UnoEuro plugin may stop working if they decommission the old API endpoint.
+* Warnings have been added to the UnoEuro plugin to inform users about migrating to Simply.
+* Updated DNSPod plugin to work with their recent API changes. Existing users will need to generate a new API key from the management console and update the plugin args for their orders. See the [usage guide](https://github.com/rmbolger/Posh-ACME/blob/master/Posh-ACME/DnsPlugins/DNSPod-Readme.md) for details.
+* Fixed a bug in `New-PAAccount` when the account location URI had query parameters. (Thanks @KaiWalter)
+
+## 3.18.1 (2020-11-12)
+
+* Upgraded BouncyCastle to 1.8.8.2 for version parity with Az.KeyVault to prevent module load errors in PowerShell 6+
+* Fixed DuckDNS plugin file locations in .NET 4.6 fork.
+
+## 3.18.0 (2020-11-07)
+
+* Added new DNS plugin [DuckDNS](https://www.duckdns.org/). Note that due to provider limitations, this plugin can only normally be used for certs with a single name unless you workaround the limitation with custom scripting. See the [usage guide](https://github.com/rmbolger/Posh-ACME/blob/master/Posh-ACME/DnsPlugins/DuckDNS-Readme.md) for details.
+* Fixed an example in `Export-PAAccountKey` help.
+* Added code to detect 4.x configs and gracefully revert in case folks need to downgrade after upgrading to 4.x when it comes out.
+
+## 3.17.0 (2020-10-09)
+
+* NOTE: Let's Encrypt is now [restricting](https://community.letsencrypt.org/t/issuing-for-common-rsa-key-sizes-only/133839) RSA private key sizes to 2048, 3072, and 4096 for certificates. But Posh-ACME will continue to allow custom key sizes which may still work with other certificate authorities. 
+* `New-PAAccount` and `Set-PAAccount -KeyRollover` now have a `-KeyFile` parameter that can be used to import an existing private key instead of generating a new one from scratch.
+* Added `Export-PAAccountKey` which can be use to export your ACME account private key as a standard Base64 encoded PEM file.
+  * For Boulder-based CAs, this can be used to recover lost ACME account configurations if you run `New-PAAccount` with the `-KeyFile` parameter and specify the exported key.
+* Updated Zonomi plugin to support alternative providers who use a compatible API. (#282)
+* Fixed a bug in OVH plugin that would prevent TXT record deletion in some cases. (#283)
+* Fixed a bug in many plugins that would prevent TXT record editing when the record name was also the zone root (#280) (Thanks @ShaBangBinBash)
+* Fixed tutorial syntax error (#277) (Thanks @Leon99)
+* Fixed errors in `Get-PAAuthorizations` when returned object has no 'expires' property. (#276) (Thanks @mortenmw)
+* Changed bad nonce retry message from Debug to Verbose so people using PowerShell's transcript features will see it more easily.
+* A generic platform value has been added to the user agent string the module sends with its ACME requests.
+* Tests have been updated for use with Pester v5. Running them in a dedicated PowerShell process is recommended.
+
+## 3.16.0 (2020-08-31)
+
+* Added new DNS plugin [NameSilo](https://www.namesilo.com) (Thanks @rkone)
+* Added Preferred Chain support
+  * There is a new `-PreferredChain` parameter on `New-PACertificate`, `New-PAOrder`, and `Set-PAOrder`.
+  * For new or existing orders, you may select an alternate CA chain based on the Issuing CA subject name if alternate chains are offered by the CA.
+  * Example: `-PreferredChain 'ISRG Root X1'`
+* Fixed a bug with `Submit-Renewal` that wasn't properly using `-PluginArgs` and `-NoSkipManualDns` parameters when `-AllOrders` or `-AllAccounts` switches were also used (#266 #275). (Thanks @f-bader)
+* deSEC plugin has added retry logic to address API throttling issues for certs with many names (#275).
+* Fixed a bug with Azure plugin when using `AZCertPfx` authentication from Windows.
+
+## 3.15.1 (2020-07-08)
+
+* Fixed Route53 trying to load AWSPowerShell module when not installed (#263)
+
+## 3.15.0 (2020-06-22)
+
+* Added new DNS plugin [DomainOffensive](https://www.do.de) (Thanks @Armitxes)
+* `New-PAAccount` now has `ExtAcctKID`, `ExtAcctHMACKey`, and `ExtAcctAlgorithm` parameters to support Certificate Authorities that require external account binding. Look for a guide in the wiki soon.
+* Added support for the new AWS.Tools modules when using Route53.
+* Added support for more restricted API permissions when using OVH. It's now possible to only grant write access to a specific list of zones or even individual TXT records. See the usage guide for details.
+* Added pre-registration support for AcmeDns. See the usage guide for details.
+* Fixed a bug with GoDaddy that prevented managing DNS-only hosted domains.
+
+## 3.14.0 (2020-05-07)
+
+* Added new DNS plugin [Hetzner](https://www.hetzner.de/) (Thanks @derguterat)
+* Fix for Google DNS plugin to ignore private zones. (Thanks @timwsuqld)
+* Fix for Azure usage guide for using existing access token. (Thanks @arestarh)
+* Fix for RFC2136 plugin which makes it usable for records other than the root domain.
+
+## 3.13.0 (2020-04-11)
+
+* Added new DNS plugins
+  * Akamai
+  * DNSPod (Thanks @WiZaRd31337)
+  * Loopia
+  * PointDNS (Thanks @danielsen)
+  * Reg.ru (Thanks @WiZaRd31337)
+  * RFC2136
+  * Selectel.ru (Thanks @WiZaRd31337)
+  * Yandex (Thanks @WiZaRd31337)
+* When creating a new order, chain.cer and fullchain.cer are now backed up along with the other files.
+* Added a workaround for non-compliant ACME server Nexus CM (#227)
+* Various usage guide corrections. (Thanks @webprofusion-chrisc)
+* Fixed a bug where New-PACertificate required the `-Force` parameter if the previous order was deactivated.
+* Fixed the dev install script to account for a redirected Documents folder.
+* Minor changes to how Gandi plugin works to address potential edge case bugs.
+
+## 3.12.0 (2019-12-10)
+
+* `Set-PAOrder` now has `-DnsPlugin` and `-PluginArgs` parameters to allow changing plugins and associated credentials prior to a renewal operation.
+* Upgraded BouncyCastle library to version 1.8.5.2 and renamed the DLL to avoid conflicts with older copies that may get installed into the .NET GAC by other software.
+* ACME server errors returned during calls to `Revoke-PAAuthorization` are now non-terminating errors rather than warnings.
+* Fixed bug where new orders created with `New-PACertificate` and no explicit plugin wouldn't get the Manual default if the account was already authorized for the included names.
+* Fixed `Get-PAAuthorizations` when using explicit account reference
+* Fixed datetime parsing issues on non-US culture environments (#208)
+* Fixed errors thrown by `Submit-Renewal` when run against an order with a null DnsPlugin. A warning is now thrown instead.
+* Fixed parameter binding error when using `-PluginArgs` with `Submit-Renewal`
+* Fixed HurricanElectric guide's parameter references
+* Fixed Azure tests
+
+## 3.11.0 (2019-11-12)
+
+* Added `Revoke-PAAuthorization` which enables revocation of identifier authorizations associated with an account.
+* `Get-PAAuthorizations` now has an optional -Account parameter and better error handling.
+* `Get-PAAuthorization` has been added as an alias for `Get-PAAuthorizations` to better comply with PowerShell naming standards. It will likely be formally renamed in version 4.x and the old name should be considered deprecated. This change should allow dependent scripts to prepare for that change in advance.
+* `Install-PACertificate` now supports parameters to select the store name, location, and the exportable flag.
+* Workaround for Boulder [issue](https://github.com/letsencrypt/boulder/issues/4540) that doesn't return JSON error bodies for old endpoints.
+* Fixed bug creating new orders with a changed KeyLength value that was preventing the required new private key from being created.
+
+## 3.10.0 (2019-11-06)
+
+* Added new DNS plugin [HurricaneElectric](https://dns.he.net/)
+* Azure plugin now supports certificate based authentication. See the [plugin guide](https://github.com/rmbolger/Posh-ACME/blob/master/Posh-ACME/DnsPlugins/Azure-Readme.md) for details. (#190)
+* Setup examples in the Azure plugin guide now utilize the [Az](https://www.powershellgallery.com/packages/Az/3.0.0) module rather than the legacy AzureRm.* modules. (#189)
+* Fix for "No order for ID" errors caused by recent Boulder changes that no longer return order details for expired orders. (#192)
+* Fixed being unable to switch active orders if an error occurred trying to refresh the order details from the ACME server.
+* Added additional guidance on renewals and deployment to the tutorial.
+
+## 3.9.0 (2019-10-26)
+
+* Added new DNS plugin [UnoEuro](https://www.unoeuro.com/) (Thanks @OrKarstoft)
+* Fix for Cloudflare plugin not working properly when limited scope token didn't have at least read permissions to all zones on an account. To use an edit token with limited zone permissions, you must now also specify a secondary token with read permissions to all zones. See the [plugin guide](https://github.com/rmbolger/Posh-ACME/blob/master/Posh-ACME/DnsPlugins/Cloudflare-Readme.md) for details. (#184)
+*  Fix for PropertyNotFound exception when imported plugin data is null or not the expected hashtable value (#182)
+
+## 3.8.0 (2019-09-27)
+
+* `Set-PAOrder` now supports modifying some order properties such as FriendlyName, PfxPass, and the Install switch that don't require generating a new ACME order. FriendlyName or PfxPass changes will regenerate the current PFX files with the new value(s) if they exist. Changes to the Install switch will only affect future renewals.
+* Fixed FriendlyName, PfxPass, and Install parameters not applying when calling `New-PACertificate` against an existing order (#178)
+* Fixed GoDaddy plugin so it doesn't fail on large accounts (100+ domains) (#179)
+* Updated Cloudflare plugin to workaround API bug with limited scope tokens (#176)
+* Fixed DnsSleep and ValidationTimout being null when manually creating an order with `New-PAOrder` and finishing it with `New-PACertificate`.
+* Added parameter help for -NewKey on `New-PAOrder` which was missing.
+* When using `New-PACertificate` against an already completed order that is not ready for renewal, the informational message has been changed to Warning from Verbose to make it more apparent that nothing was done.
+* Updated `instdev.ps1` so it still works when the BouncyCastle DLL is locked and $ErrorActionPreference is set to Stop.
+* Updated a bunch of plugin guides with info regarding PowerShell 6.2's fix for the SecureString serialization bug and enabling the use of secure parameter sets on non-Windows.
+
+## 3.7.0 (2019-09-18)
+
+* Submit-Renewal now has a PluginArgs parameter to make it easier to update plugin credentials without needing to create a new order from scratch. (Thanks @matt-FFFFFF)
+* The FriendlyName parameter in New-PACertificate and New-PAOrder now defaults to the certificate's primary name instead of an empty string to avoid a Windows bug that can occur when installing the generated PFX files.
+* Fixed Windows plugin issue when using WinZoneScope and not all zones have that scope (#168)
+* Fixed an internal bug with Export-PACertFiles that luckily didn't cause problems due to PowerShell variable scoping rules.
+* Fixed a typo in the Cloudflare guide examples. (Thanks @mccanney)
+
+## 3.6.0 (2019-08-19)
+
+* Added new DNS plugins
+  * Domeneshop (Thanks @ornulfn)
+  * Dreamhost (Thanks @jhendricks123)
+  * EasyDNS (Thanks @abrysiuk)
+  * FreeDNS (afraid.org)
+* Added `Invoke-HttpChallengeListener` function (Thanks @soltroy). This runs a self-hosted web server that can answer HTTP challenges. Look for a wiki usage guide soon.
+* Added `Remove-PAServer` function. Warning: This deletes all data (accounts, orders, certs) associated with an ACME server.
+* Added `Install-PACertificate` function. This can be used to manually import a cert to the Windows cert store. (#159)
+* Added support for Cloudflare's new limited access API Tokens. See usage guide for details.
+* Added support for propagation polling with ClouDNS plugin. See usage guide for details.
+* Fixed edge case zone finding bug with ClouDNS plugin.
+* Fixed DOcean (Digital Ocean) plugin which broke because they now enforce a 30 sec TTL minimum on record creation.
+* Fixed overly aggressive error trapping in OVH plugin. (#162)
+* Fixed a typo in the OVH plugin usage guide.
+* Fixed SkipCertificateCheck is no longer ignored when passing a PAServer object via pipeline to Set-PAServer.
+* Fixed `Submit-ChallengeValidation` no longer tries to sleep when DnsSleep = 0.
+* Some internal refactoring.
+
+## 3.5.0 (2019-06-21)
+
+* Added new DNS plugin for Simple DNS Plus (#149) (Thanks @alphaz18)
+* Changed a bunch of "-ErrorAction SilentlyContinue" references to "Ignore" so we're not filling the $Error collection with junk.
+* Fix for Boulder removing ID field from new account output.
+* Fixed an issue in a number of plugins that could cause errors if the case of the requested record didn't match the server's zone case. (Thanks @Makr91)
+* Fixed a bug with the Route53 plugin when used on PowerShell Core without the AwsPowerShell module installed.
+* Fixed some typos in the OVH plugin usage guide examples (#147)
+
+## 3.4.0 (2019-04-30)
+
+* Added new DNS plugin for OVH (#79)
+* Added ZoneScope support to Windows plugin (#134) (Thanks @dawe78)
+* Fixed issue #139 with GCloud plugin prompting for GCKeyFile after upgrading to 3.3.0. Users affected by this issue will need to submit a new cert request to re-establish the GCloud plugin config.
+* Fixed issue #140 with AcmeDns plugin losing registration data after upgrading to 3.3.0. Users affected by this issue will need to submit a new cert request to re-establish the AcmeDns plugin config and it will likely involve updating any CNAME records currently in use.
+
+## 3.3.0 (2019-03-24)
+
+* Route53 plugin now has IAM Role support if you're running Posh-ACME from within AWS. See plugin usage guide for details (#128)
+* Dynu plugin migrated to v2 of the Dynu API
+* Fixed DNSPlugin and DNSAlias arrays not getting expanded properly when the number of names in the cert didn't match the values in those arrays.
+* Fixed validation bugs when using SAN certs with challenge aliases or multiple different plugins (#127) (Thanks @whbingham)
+* Revamped serialization/deserialization for plugin arguments which should prevent accidentally creating parameter binding conflicts when switching between parameter sets for a particular plugin (#129).
+
+## 3.2.1 (2019-03-04)
+
+* Fix #122 to make sure private keys are imported properly when using `-Install`
+* Improve error handling for duplicate public zones in Azure. (#125)
+* Add tag based workaround for duplicate public zones in Azure. (#125)
+
+## 3.2.0 (2019-01-22)
+
+* Added new DNS plugin for name.com registrar (Thanks @ravensorb)
+* Added additional argument completers for Account IDs, MainDomain, and KeyLength parameters
+* The Posh-ACME config location can now be set by creating a `POSHACME_HOME` environment variable. The directory must exist and be accessible prior to importing the module. If you change the value of the environment variable, you need to re-import the module with `-Force` or open a new PowerShell session for the change to take effect.
+* Added better error handling for cases where the config location is not writable.
+* Get-PACertificate now returns null instead of throwing an error if the cert or associated order doesn't exist
+* Fixed the ability to revoke a certificate after the associated order has expired
+* Fix for #117 involving broken renewal processing on PowerShell Core in non-US locales
+* Fixes for additional DateTime handling on PowerShell Core
+
 ## 3.1.1 (2018-12-22)
 
 * Fixed typo in Route53 plugin that prevented finding the AwsPowershell module

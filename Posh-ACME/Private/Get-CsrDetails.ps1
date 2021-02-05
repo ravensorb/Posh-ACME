@@ -13,7 +13,7 @@ function Get-CsrDetails {
 
     # parse the file into a [Org.BouncyCastle.Asn1.Pkcs.CertificationRequest]
     Write-Debug "Attempting to import CSR pem"
-    $csr = Import-Pem $CSRPath
+    $csr = Import-Pem -InputFile $CSRPath
     $details = @{
         Base64Url = ConvertTo-Base64Url $csr.GetEncoded()
     }
@@ -55,6 +55,16 @@ function Get-CsrDetails {
     # grab the rest of the attributes [Org.BouncyCastle.Asn1.Asn1Set]
     # The Asn1Set is basically a nested collection of DerSequence objects
     $attr = $csrInfo.Attributes
+
+    # Check if we have any attributes at all
+    if ($attr.count -eq 0) {
+        # throw if we have no CN
+        if ($details.Domain.Count -eq 0) { throw "No Common Name (CN) or Subject Alternative Name (SAN) extensions found in certificate request." }
+
+        Write-Warning "No Certficate Attributes found in CR."
+        $details.OCSPMustStaple = $false
+        return $details
+    }
 
     # Find the sequence for "Certificate Extensions" (oid 1.2.840.113549.1.9.14)
     # [0] is the OID, [1] is the nested Asn1Set,

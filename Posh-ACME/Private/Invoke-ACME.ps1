@@ -11,8 +11,7 @@ function Invoke-ACME {
         [Parameter(ParameterSetName='RawKey',Mandatory,Position=2)]
         [ValidateScript({Test-ValidKey $_ -ThrowOnFail})]
         [Security.Cryptography.AsymmetricAlgorithm]$Key,
-        [switch]$NoRetry,
-        [string]$OutFile
+        [switch]$NoRetry
     )
 
     # make sure we have a server configured
@@ -54,17 +53,24 @@ function Invoke-ACME {
             UserAgent = $script:USER_AGENT
             Headers = $script:COMMON_HEADERS
             ErrorAction = 'Stop'
-        }
-        if (-not [String]::IsNullOrWhiteSpace($OutFile)) {
-            $iwrSplat.OutFile = $OutFile
+            Verbose = $false
         }
 
+        Write-Debug "POST $($iwrSplat.Uri)"
         $response = Invoke-WebRequest @iwrSplat @script:UseBasic
+
+        if ($response -and $response.Content) {
+            if ($response.Headers['Content-Type'] -notlike 'application/pem-certificate-chain*') {
+                Write-Debug "ACME Response: `n$($response.Content)"
+            } else {
+                Write-Debug "ACME Response: (binary)"
+            }
+        }
 
         # update the next nonce if it was sent
         if ($response -and $response.Headers.ContainsKey($script:HEADER_NONCE)) {
             $script:Dir.nonce = $response.Headers[$script:HEADER_NONCE] | Select-Object -First 1
-            Write-Debug "Updating nonce: $($script:Dir.nonce)"
+            Write-Debug "Updated nonce: $($script:Dir.nonce)"
         }
 
         return $response
@@ -85,7 +91,7 @@ function Invoke-ACME {
             # update the next nonce if it was sent
             if ($script:HEADER_NONCE -in $response.Headers) {
                 $script:Dir.nonce = $response.GetResponseHeader($script:HEADER_NONCE) | Select-Object -First 1
-                Write-Debug "Updating nonce from error response: $($script:Dir.nonce)"
+                Write-Debug "Updated nonce from error response: $($script:Dir.nonce)"
                 $freshNonce = $true
             }
 
@@ -94,7 +100,7 @@ function Invoke-ACME {
             $sr.BaseStream.Position = 0
             $sr.DiscardBufferedData()
             $body = $sr.ReadToEnd()
-            Write-Debug "Error Body: $body"
+            Write-Debug "ACME Error Body: `n$body"
 
         } elseif ('Microsoft.PowerShell.Commands.HttpResponseException' -eq $exType) {
 
@@ -110,7 +116,7 @@ function Invoke-ACME {
             # update the next nonce if it was sent
             if ($script:HEADER_NONCE -in $response.Headers.Key) {
                 $script:Dir.nonce = ($response.Headers | Where-Object { $_.Key -eq $script:HEADER_NONCE }).Value | Select-Object -First 1
-                Write-Debug "Updating nonce from error response: $($script:Dir.nonce)"
+                Write-Debug "Updated nonce from error response: $($script:Dir.nonce)"
                 $freshNonce = $true
             }
 
@@ -123,7 +129,7 @@ function Invoke-ACME {
             # tags. And since our body should be JSON, there shouldn't be any tags to remove.
             # So we'll just go with it for now until someone reports a problem.
             $body = $_.ErrorDetails.Message
-            Write-Debug "Error Body: $body"
+            Write-Debug "ACME Error Body: `n$body"
 
         } else { throw }
 
@@ -132,15 +138,26 @@ function Invoke-ACME {
         # So a JSON parseable error object should be in the response body.
         try { $acmeError = $body | ConvertFrom-Json }
         catch {
-            Write-Warning "Response body was not JSON parseable"
-            # re-throw the original exception
-            throw $ex
+            # Old endpoints won't necessarily throw rfc7807 bodies
+            # for 404 errors. So we're going to fake them.
+            # https://github.com/letsencrypt/boulder/issues/4540
+            if (404 -eq $response.StatusCode) {
+                $acmeError = @{
+                    type = 'urn:ietf:params:acme:error:malformed'
+                    detail = 'Page not found'
+                    status = 404
+                }
+            } else {
+                Write-Warning "ACME response body was not JSON parseable"
+                # re-throw the original exception
+                throw $ex
+            }
         }
 
         # check for badNonce and retry once
         if (!$NoRetry -and $freshNonce -and $acmeError.type -and $acmeError.type -like '*:badNonce') {
             $Header.nonce = $script:Dir.nonce
-            Write-Debug "Retrying with updated nonce"
+            Write-Verbose "Nonce rejected by ACME server. Retrying with updated nonce."
             return (Invoke-ACME $Header $PayloadJson -Key $acctKey -NoRetry)
         }
 
@@ -173,9 +190,6 @@ function Invoke-ACME {
 
     .PARAMETER NoRetry
         If specified, don't retry on bad nonce errors. Occasionally, the nonce provided in an ACME message will be rejected. By default, this function requests a new nonce once and tries to send the message again before giving up.
-
-    .PARAMETER OutFile
-        Specifies the output file for which this function saves the response body. Enter a path and file name. If you omit the path, the default is the current location.
 
     .EXAMPLE
         $acct = Get-PAAccount

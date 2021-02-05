@@ -22,15 +22,12 @@ function Update-PAOrder {
                 return
             }
             $order = $script:Order
-            $UpdatingCurrent = $true
         } else {
             # even if they specified the order explicitly, we may still be updating the
             # "current" order. So figure that out and set a flag for later.
             if ($script:Order -and $script:Order.MainDomain -and $script:Order.MainDomain -eq $MainDomain) {
-                $UpdatingCurrent = $true
                 $order = $script:Order
             } else {
-                $UpdatingCurrent = $false
                 $order = Get-PAOrder $MainDomain
                 if ($null -eq $order) {
                     Write-Warning "Specified order for $MainDomain was not found. Nothing to update."
@@ -39,7 +36,10 @@ function Update-PAOrder {
             }
         }
 
-        if (!$SaveOnly) {
+        if (-not $SaveOnly -and
+            (-not $order.expires -or (Get-DateTimeOffsetNow) -lt ([DateTimeOffset]::Parse($order.expires))) )
+        {
+
             Write-Debug "Refreshing order $($order.MainDomain)"
 
             # build the header
@@ -53,8 +53,10 @@ function Update-PAOrder {
             # send the request
             try {
                 $response = Invoke-ACME $header ([String]::Empty) $acct -EA Stop
-            } catch { throw }
-            Write-Debug "Response: $($response.Content)"
+            } catch [AcmeException] {
+                Write-Warning "ACME Exception querying order details for $($order.MainDomain): $($_.Exception.Message)"
+                return
+            }
 
             $respObj = $response.Content | ConvertFrom-Json
 
@@ -64,11 +66,28 @@ function Update-PAOrder {
             if ($respObj.certificate) {
                 $order.certificate = $respObj.certificate
             }
+        } elseif (-not $SaveOnly) {
+            # Let's Encrypt no longer returns order details for expired orders
+            # https://github.com/letsencrypt/boulder/commit/83aafd18842e093483d6701b92419ca8f7f1855b
+            # So don't bother asking if we know it's already expired.
+            Write-Debug "Order $($order.MainDomain) is expired. Skipping server refresh."
         }
 
-        # save it to disk
-        $orderFolder = Join-Path $script:AcctFolder $order.MainDomain.Replace('*','!')
-        $order | ConvertTo-Json | Out-File (Join-Path $orderFolder 'order.json') -Force -EA Stop
+        # Save the order to disk
+        # We're going to obfuscate the PfxPass property to satisfy some requests
+        # to not have it in plain text.
+        $orderFolder = $order | Get-OrderFolder
+        if (-not (Test-Path $orderFolder -PathType Container)) {
+            New-Item -ItemType Directory -Path $orderFolder -Force -EA Stop | Out-Null
+        }
+
+        # make a copy of the order so we can tweak it without messing up
+        # our existing copy and swap PfxPass for PfxPassB64U
+        $orderCopy = $order | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+        $orderCopy | Add-Member 'PfxPassB64U' ($order.PfxPass | ConvertTo-Base64Url)
+        $orderCopy.PSObject.Properties.Remove('PfxPass')
+
+        $orderCopy | ConvertTo-Json -Depth 10 | Out-File (Join-Path $orderFolder 'order.json') -Force -EA Stop
     }
 
 }

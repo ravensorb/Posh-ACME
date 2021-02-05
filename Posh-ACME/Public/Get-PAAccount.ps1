@@ -23,7 +23,8 @@ function Get-PAAccount {
     Begin {
         # make sure we have a server configured
         if (!(Get-PAServer)) {
-            throw "No ACME server configured. Run Set-PAServer first."
+            try { throw "No ACME server configured. Run Set-PAServer first." }
+            catch { $PSCmdlet.ThrowTerminatingError($_) }
         }
 
         # make sure the Contact emails have a "mailto:" prefix
@@ -50,7 +51,7 @@ function Get-PAAccount {
 
             # read the contents of each accounts's acct.json
             Write-Debug "Loading PAAccount list from disk"
-            $rawFiles = Get-ChildItem "$($script:DirFolder)\*\acct.json" | Get-Content -Raw
+            $rawFiles = Get-ChildItem "$((Get-DirFolder))\*\acct.json" | Get-Content -Raw
             $accts = $rawFiles | ConvertFrom-Json | Sort-Object id | ForEach-Object {
 
                     # insert the type name and send the results to the pipeline
@@ -85,13 +86,13 @@ function Get-PAAccount {
             if ($ID) {
 
                 # build the path to acct.json
-                $acctFolder = Join-Path $script:DirFolder $ID
+                $acctFolder = Join-Path (Get-DirFolder) $ID
                 $acctFile = Join-Path $acctFolder 'acct.json'
 
                 # check if it exists
                 if (Test-Path $acctFile -PathType Leaf) {
-                    Write-Debug "Loading PAAccount from disk"
-                    $acct = Get-ChildItem $acctFile | Get-Content -Raw | ConvertFrom-Json
+                    Write-Debug "Loading PAAccount $ID from disk"
+                    $acct = Get-Content $acctFile -Raw | ConvertFrom-Json
                     $acct.PSObject.TypeNames.Insert(0,'PoshACME.PAAccount')
                 } else {
                     return $null

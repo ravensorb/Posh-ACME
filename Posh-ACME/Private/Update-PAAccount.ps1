@@ -53,7 +53,6 @@ function Update-PAAccount {
         try {
             $response = Invoke-ACME $header ([String]::Empty) $acct -EA Stop
         } catch { throw }
-        Write-Debug "Response: $($response.Content)"
 
         $respObj = $response.Content | ConvertFrom-Json
 
@@ -62,8 +61,8 @@ function Update-PAAccount {
         $acct.contact = $respObj.contact
 
         # save it to disk
-        $acctFolder = Join-Path $script:DirFolder $acct.id
-        $acct | ConvertTo-Json | Out-File (Join-Path $acctFolder 'acct.json') -Force -EA Stop
+        $acctFolder = Join-Path (Get-DirFolder) $acct.id
+        $acct | ConvertTo-Json -Depth 5 | Out-File (Join-Path $acctFolder 'acct.json') -Force -EA Stop
     }
 
 }
